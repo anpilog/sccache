@@ -57,6 +57,7 @@ openssl = { version = "0.10", optional = true }
 percent-encoding = { version = "2", optional = true }
 rand = "0.7"
 redis = { version = "0.17", optional = true }
+redis_cluster_async = "0.5"
 regex = "1"
 reqwest = { version = "0.9.11", optional = true }
 retry = "1"
