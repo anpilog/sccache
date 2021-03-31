@@ -16,8 +16,7 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::aio::Connection;
-use redis::{cmd, Client, InfoDict};
+use redis_cluster_async::{Client, Connection, redis::{cmd, InfoDict, RedisError}};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::{Duration, Instant};
@@ -32,15 +31,16 @@ pub struct RedisCache {
 impl RedisCache {
     /// Create a new `RedisCache`.
     pub fn new(url: &str) -> Result<RedisCache> {
+        let nodes = vec![url];
         Ok(RedisCache {
             url: url.to_owned(),
-            client: Client::open(url)?,
+            client: Client::open(nodes)?,
         })
     }
 
     /// Returns a connection with configured read and write timeouts.
     async fn connect(self) -> Result<Connection> {
-        Ok(self.client.get_async_connection().await?)
+        Ok(self.client.get_connection().await?)
     }
 }
 
@@ -106,7 +106,7 @@ impl Storage for RedisCache {
         Box::new(
             Box::pin(async move {
                 let mut c = me.connect().await?;
-                let result: redis::RedisResult<HashMap<String, usize>> = cmd("CONFIG")
+                let result: redis_cluster_async::redis::RedisResult<HashMap<String, usize>> = cmd("CONFIG")
                     .arg("GET")
                     .arg("maxmemory")
                     .query_async(&mut c)
