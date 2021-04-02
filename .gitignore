@@ -11,3 +11,7 @@ target
 /snap/.snapcraft
 /stage
 /*.snap
+
+
+# vscode files
+.vscode
