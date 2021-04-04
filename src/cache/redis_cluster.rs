@@ -1,5 +1,4 @@
-// Copyright 2016 Mozilla Foundation
-// Copyright 2016 Felix Obenhuber <felix@obenhuber.de>
+// Copyright 2016 Shawn Hice <shawnhice@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,45 +15,59 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::{cmd, Client, InfoDict};
+use redis::{cmd, InfoDict, Client};
 use redis::cluster::{ClusterClient, ClusterConnection};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::{Duration, Instant};
 
-// futures 0.13
-use futures_03::executor::ThreadPool;
-
+// For displaying slices of String Vecs
 use crate::config::{SliceDisplay};
 
-/// A cache that stores entries in a Redis.
-#[derive(Clone)]
-pub struct RedisClusterCacheold {
-    url: String,
-    client: Client,
-}
-
-/// A Async Cache of Redis connections
-#[derive(Clone)]
-pub struct RedisAsyncCache {
-    url: String,
-    pool: ThreadPool,
-}
-
+/// A Redis Cluster Client Implementation
+/// Unfortunately Cluster Connection does not implement aio:ConnectionLike - only sync
 #[derive(Clone)]
 pub struct RedisClusterCache {
     urls: Vec<String>,
     cluster_client: ClusterClient,
 }
 
+/// An Alternative to `RedisClusterCache` that will implement Async `Redis::Client` in a thread pool
+/// Each Client is resolved and printed independently
+#[derive(Clone)]
+pub struct RedisClientPool {
+    urls: Vec<String>,
+    // you could just construct a bunch of RedisClientCache Objects if you want
+    clients: Vec<Client>
+}
+
+impl RedisClientPool {
+    /// Creates a new `RedisClientPool` by constructing `redis::Client` objects from all URLs
+    pub fn new(urls: &Vec<String>) -> Result<RedisClientPool> {
+        Ok({
+            let connections = urls.to_owned().iter().map(| url | {
+                // map each value to a client open if possible
+                // ignore invalid servers
+                Client::open(url.to_owned()).unwrap()
+                // todo: notify if invalid
+            }).collect();
+
+            RedisClientPool {
+                urls: urls.to_owned(),
+                clients: connections,
+            }
+        })
+    }
+}
+
 impl RedisClusterCache {
     /// Create a new `RedisClusterCache`.
-    pub fn new(url: &Vec<String>) -> Result<RedisClusterCache> {
+    pub fn new(urls: &Vec<String>) -> Result<RedisClusterCache> {
         // Initialize urls and cluster_client
         Ok(RedisClusterCache {
-            urls: url.to_owned(),
+            urls: urls.to_owned(),
             // does a sanity check of the nodes and passwords
-            cluster_client: ClusterClient::open(url.to_owned())?,
+            cluster_client: ClusterClient::open(urls.to_owned())?,
         })
     }
 

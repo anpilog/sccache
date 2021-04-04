@@ -172,9 +172,11 @@ If you need to override the default endpoint you can set `SCCACHE_ENDPOINT`. To 
 
 You can also define a prefix that will be prepended to the keys of all cache objects created and read within the S3 bucket, effectively creating a scope. To do that use the `SCCACHE_S3_KEY_PREFIX` environment variable. This can be useful when sharing a bucket with another application.
 
-
 ### Redis
+#### Instance
 Set `SCCACHE_REDIS` to a [Redis](https://redis.io/) url in format `redis://[:<passwd>@]<hostname>[:port][/<db>]` to store the cache in a Redis instance. Redis can be configured as a LRU (least recently used) cache with a fixed maximum cache size. Set `maxmemory` and `maxmemory-policy` according to the [Redis documentation](https://redis.io/topics/lru-cache). The `allkeys-lru` policy which discards the *least recently accessed or modified* key fits well for the sccache use case.
+#### Cluster
+Set `SCCACHE_REDIS_CLUSTER` to a collection of [Redis](https://redis.io/) urls in format `redis://[:<passwd>@]<hostname>[:port][/<db>];redis://[:<passwd>@]<hostname>[:port][/<db>]` delimited by `;` , this will initialize a cluster instead.
 
 ### Memcached
 Set `SCCACHE_MEMCACHED` to a [Memcached](https://memcached.org/) url in format `tcp://<hostname>:<port> ...` to store the cache in a Memcached instance.
