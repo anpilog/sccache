@@ -386,11 +386,11 @@ pub fn storage_from_config(config: &Config, pool: &ThreadPool) -> Arc<dyn Storag
                 }
             }
             CacheType::RedisCluster(config::RedisClusterCacheConfig { ref url }) => {
-                debug!("Trying RedisCluster({})", config::SliceDisplay(url));
+                debug!("Trying RedisCluster({})", SliceDisplay(url));
                 #[cfg(feature = "redis")]
                 match RedisClusterCache::new(url) {
                     Ok(s) => {
-                        trace!("Using RedisCluster: {}", config::SliceDisplay(url));
+                        trace!("Using RedisCluster: {}", SliceDisplay(url));
                         return Arc::new(s);
                     }
                     Err(e) => warn!("Failed to create RedisClusterCache: {:?}", e),

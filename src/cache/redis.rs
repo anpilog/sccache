@@ -18,32 +18,15 @@ use crate::errors::*;
 use futures_03::prelude::*;
 use redis::aio::Connection;
 use redis::{cmd, Client, InfoDict};
-use redis::cluster::ClusterClient;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::{Duration, Instant};
-
-// futures 0.13
-use futures_03::executor::ThreadPool;
 
 /// A cache that stores entries in a Redis.
 #[derive(Clone)]
 pub struct RedisCache {
     url: String,
     client: Client,
-}
-
-/// A Async Cache of Redis connections
-#[derive(Clone)]
-pub struct RedisAsyncCache {
-    url: String,
-    pool: ThreadPool,
-}
-
-#[derive(Clone, Debug)]
-pub struct RedisClientCluster {
-    urls: Vec<String>,
-    pool: ThreadPool,
 }
 
 impl RedisCache {

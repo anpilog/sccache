@@ -16,9 +16,8 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::aio::Connection;
 use redis::{cmd, Client, InfoDict};
-use redis::cluster::ClusterClient;
+use redis::cluster::{ClusterClient, ClusterConnection};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::{Duration, Instant};
@@ -26,9 +25,11 @@ use std::time::{Duration, Instant};
 // futures 0.13
 use futures_03::executor::ThreadPool;
 
+use crate::config::{SliceDisplay};
+
 /// A cache that stores entries in a Redis.
 #[derive(Clone)]
-pub struct RedisClusterCache {
+pub struct RedisClusterCacheold {
     url: String,
     client: Client,
 }
@@ -40,25 +41,39 @@ pub struct RedisAsyncCache {
     pool: ThreadPool,
 }
 
-#[derive(Clone, Debug)]
-pub struct RedisClusterCachenew {
+#[derive(Clone)]
+pub struct RedisClusterCache {
     urls: Vec<String>,
-    pool: ThreadPool,
+    cluster_client: ClusterClient,
 }
 
 impl RedisClusterCache {
-    /// Create a new `RedisCache`.
+    /// Create a new `RedisClusterCache`.
     pub fn new(url: &Vec<String>) -> Result<RedisClusterCache> {
-        let first_url = url[0].to_owned();
+        // Initialize urls and cluster_client
         Ok(RedisClusterCache {
-            url: first_url.to_owned(),
-            client: Client::open(first_url)?,
+            urls: url.to_owned(),
+            // does a sanity check of the nodes and passwords
+            cluster_client: ClusterClient::open(url.to_owned())?,
         })
     }
 
-    /// Returns a connection with configured read and write timeouts.
+    /*
     async fn connect(self) -> Result<Connection> {
         Ok(self.client.get_tokio_connection().await?)
+    }
+    */
+
+    /// Returns a connection with configured read and write timeouts.
+    /// This is a synchronous call instead of async, could however be made async if someone really wanted
+    /// With a pool of regular Redis Clients
+    ///
+    /// TODO: this should only be called once and preserved with the chek_connection function
+    pub fn sync_connect(self) -> Result<ClusterConnection> {
+        Ok(
+            // propagate the error up if this is a failure for some reason
+            self.cluster_client.get_connection()?
+        )
     }
 }
 
@@ -69,8 +84,11 @@ impl Storage for RedisClusterCache {
         let me = self.clone();
         Box::new(
             Box::pin(async move {
-                let mut c = me.connect().await?;
-                let d: Vec<u8> = cmd("GET").arg(key).query_async(&mut c).await?;
+                // converted to sync for a cluster connection
+                let mut c = me.sync_connect()?;
+                // ClusterConnection implements a ConnectionLike which is already used by this
+                // Oh good lord apparently it doesn't implement aio::ConnectionLike
+                let d: Vec<u8> = cmd("GET").arg(key).query(&mut c)?;
                 if d.is_empty() {
                     Ok(Cache::Miss)
                 } else {
@@ -88,9 +106,9 @@ impl Storage for RedisClusterCache {
         let start = Instant::now();
         Box::new(
             Box::pin(async move {
-                let mut c = me.connect().await?;
+                let mut c = me.sync_connect()?;
                 let d = entry.finish()?;
-                cmd("SET").arg(key).arg(d).query_async(&mut c).await?;
+                cmd("SET").arg(key).arg(d).query(&mut c)?;
                 Ok(start.elapsed())
             })
             .compat(),
@@ -99,7 +117,7 @@ impl Storage for RedisClusterCache {
 
     /// Returns the cache location.
     fn location(&self) -> String {
-        format!("Redis: {}", self.url)
+        format!("Redis: {}", SliceDisplay(&self.urls))
     }
 
     /// Returns the current cache size. This value is aquired via
@@ -108,8 +126,8 @@ impl Storage for RedisClusterCache {
         let me = self.clone(); // TODO Remove clone
         Box::new(
             Box::pin(async move {
-                let mut c = me.connect().await?;
-                let v: InfoDict = cmd("INFO").query_async(&mut c).await?;
+                let mut c = me.sync_connect()?;
+                let v: InfoDict = cmd("INFO").query(&mut c)?;
                 Ok(v.get("used_memory"))
             })
             .compat(),
@@ -123,12 +141,11 @@ impl Storage for RedisClusterCache {
         let me = self.clone(); // TODO Remove clone
         Box::new(
             Box::pin(async move {
-                let mut c = me.connect().await?;
+                let mut c = me.sync_connect()?;
                 let result: redis::RedisResult<HashMap<String, usize>> = cmd("CONFIG")
                     .arg("GET")
                     .arg("maxmemory")
-                    .query_async(&mut c)
-                    .await;
+                    .query(&mut c);
                 match result {
                     Ok(h) => {
                         Ok(h.get("maxmemory")

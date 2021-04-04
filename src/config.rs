@@ -268,6 +268,7 @@ impl CacheConfigs {
             .map(CacheType::S3)
             .into_iter()
             .chain(redis.map(CacheType::Redis))
+            .chain(redis_cluster.map(CacheType::RedisCluster))
             .chain(memcached.map(CacheType::Memcached))
             .chain(gcs.map(CacheType::GCS))
             .chain(azure.map(CacheType::Azure))
@@ -303,6 +304,9 @@ impl CacheConfigs {
         }
         if redis.is_some() {
             self.redis = redis
+        }
+        if redis_cluster.is_some() {
+            self.redis_cluster = redis_cluster
         }
         if s3.is_some() {
             self.s3 = s3
