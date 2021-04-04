@@ -1,6 +1,6 @@
 [package]
 name = "sccache"
-version = "0.2.16-alpha.0"
+version = "0.2.17-alpha.1"
 authors = ["Ted Mielczarek <ted@mielczarek.org>", "Alex Crichton <alex@alexcrichton.com>"]
 license = "Apache-2.0"
 description = "Sccache is a ccache-like tool. It is used as a compiler wrapper and avoids compilation when possible, storing a cache in a remote storage using the S3 API."
@@ -56,7 +56,7 @@ number_prefix = "0.4"
 openssl = { version = "0.10", optional = true }
 percent-encoding = { version = "2", optional = true }
 rand = "0.7"
-redis = { version = "0.17", optional = true }
+redis = { version = "0.20", optional = true, features = ["tokio-comp", "aio", "cluster"]}
 regex = "1"
 reqwest = { version = "0.9.11", optional = true }
 retry = "1"

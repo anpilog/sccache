@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 use std::str::FromStr;
 use std::sync::Mutex;
+use std::fmt;
 
 use crate::errors::*;
 
@@ -48,6 +49,25 @@ const MOZILLA_OAUTH_PKCE_AUTH_URL: &str =
 const MOZILLA_OAUTH_PKCE_TOKEN_URL: &str = "https://auth.mozilla.auth0.com/oauth/token";
 
 pub const INSECURE_DIST_CLIENT_TOKEN: &str = "dangerously_insecure_client";
+
+/// Struct to handle wrapping and displaying Vec types
+pub struct SliceDisplay<'a, T>(pub &'a [T]);
+
+/// Macro implementation of converting Vec to base display type if possible
+impl<'a, T: fmt::Display + 'a> fmt::Display for SliceDisplay<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        for item in self.0 {
+            if !first {
+                write!(f, ", {}", item)?;
+            } else {
+                write!(f, "{}", item)?;
+            }
+            first = false;
+        }
+        Ok(())
+    }
+}
 
 // Unfortunately this means that nothing else can use the sccache cache dir as
 // this top level directory is used directly to store sccache cached objects...
@@ -195,6 +215,12 @@ pub struct RedisCacheConfig {
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct RedisClusterCacheConfig {
+    pub url: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct S3CacheConfig {
     pub bucket: String,
     pub endpoint: String,
@@ -208,6 +234,7 @@ pub enum CacheType {
     GCS(GCSCacheConfig),
     Memcached(MemcachedCacheConfig),
     Redis(RedisCacheConfig),
+    RedisCluster(RedisClusterCacheConfig),
     S3(S3CacheConfig),
 }
 
@@ -219,6 +246,7 @@ pub struct CacheConfigs {
     pub gcs: Option<GCSCacheConfig>,
     pub memcached: Option<MemcachedCacheConfig>,
     pub redis: Option<RedisCacheConfig>,
+    pub redis_cluster: Option<RedisClusterCacheConfig>,
     pub s3: Option<S3CacheConfig>,
 }
 
@@ -232,6 +260,7 @@ impl CacheConfigs {
             gcs,
             memcached,
             redis,
+            redis_cluster,
             s3,
         } = self;
 
@@ -256,6 +285,7 @@ impl CacheConfigs {
             gcs,
             memcached,
             redis,
+            redis_cluster,
             s3,
         } = other;
 
@@ -480,6 +510,19 @@ fn config_from_env() -> EnvConfig {
         .ok()
         .map(|url| RedisCacheConfig { url });
 
+    let redis_cluster = env::var("SCCACHE_REDIS_CLUSTER")
+        .ok()
+        .map(|url| {
+            // TODO: Parse the url in the form ["ip", "next_ip"]
+            // or possibly "ip";"next_ip";
+            let url_vec= vec![url];
+
+            // construct the cluster with the given IP addresses
+            RedisClusterCacheConfig {
+                url: url_vec
+            }
+        });
+
     let memcached = env::var("SCCACHE_MEMCACHED")
         .ok()
         .map(|url| MemcachedCacheConfig { url });
@@ -540,6 +583,7 @@ fn config_from_env() -> EnvConfig {
         gcs,
         memcached,
         redis,
+        redis_cluster,
         s3,
     };
 

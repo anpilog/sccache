@@ -139,6 +139,7 @@ pub fn sccache_client_cfg(tmpdir: &Path) -> sccache::config::FileConfig {
             gcs: None,
             memcached: None,
             redis: None,
+            redis_cluster: None,
             s3: None,
         },
         dist: sccache::config::DistConfig {

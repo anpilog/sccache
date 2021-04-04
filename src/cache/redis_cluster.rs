@@ -28,7 +28,7 @@ use futures_03::executor::ThreadPool;
 
 /// A cache that stores entries in a Redis.
 #[derive(Clone)]
-pub struct RedisCache {
+pub struct RedisClusterCache {
     url: String,
     client: Client,
 }
@@ -41,17 +41,18 @@ pub struct RedisAsyncCache {
 }
 
 #[derive(Clone, Debug)]
-pub struct RedisClientCluster {
+pub struct RedisClusterCachenew {
     urls: Vec<String>,
     pool: ThreadPool,
 }
 
-impl RedisCache {
+impl RedisClusterCache {
     /// Create a new `RedisCache`.
-    pub fn new(url: &str) -> Result<RedisCache> {
-        Ok(RedisCache {
-            url: url.to_owned(),
-            client: Client::open(url)?,
+    pub fn new(url: &Vec<String>) -> Result<RedisClusterCache> {
+        let first_url = url[0].to_owned();
+        Ok(RedisClusterCache {
+            url: first_url.to_owned(),
+            client: Client::open(first_url)?,
         })
     }
 
@@ -61,7 +62,7 @@ impl RedisCache {
     }
 }
 
-impl Storage for RedisCache {
+impl Storage for RedisClusterCache {
     /// Open a connection and query for a key.
     fn get(&self, key: &str) -> SFuture<Cache> {
         let key = key.to_owned();

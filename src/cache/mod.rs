@@ -23,6 +23,7 @@ pub mod gcs;
 pub mod memcached;
 #[cfg(feature = "redis")]
 pub mod redis;
+pub mod redis_cluster;
 #[cfg(feature = "s3")]
 pub mod s3;
 
