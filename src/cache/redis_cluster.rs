@@ -15,14 +15,16 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::{cmd, InfoDict, Client};
-use redis::cluster::{ClusterClient, ClusterConnection};
+use redis::{cmd, InfoDict, Client, RedisResult};
+use redis::cluster::{ClusterClient, ClusterConnection, cluster_pipe};
+use redis::aio::Connection;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::{Duration, Instant};
 
 // For displaying slices of String Vecs
 use crate::config::{SliceDisplay};
+use futures_03::future::{try_join_all, ok, err};
 
 /// A Redis Cluster Client Implementation
 /// Unfortunately Cluster Connection does not implement aio:ConnectionLike - only sync
@@ -34,29 +36,41 @@ pub struct RedisClusterCache {
 
 /// An Alternative to `RedisClusterCache` that will implement Async `Redis::Client` in a thread pool
 /// Each Client is resolved and printed independently
-#[derive(Clone)]
 pub struct RedisClientPool {
     urls: Vec<String>,
-    // you could just construct a bunch of RedisClientCache Objects if you want
-    clients: Vec<Client>
+    client_map: HashMap<String, Client>,
+    // this isn't really necessary but for repeated transactions life would be easier
+    connections: HashMap<String, Connection>
 }
 
 impl RedisClientPool {
     /// Creates a new `RedisClientPool` by constructing `redis::Client` objects from all URLs
     pub fn new(urls: &Vec<String>) -> Result<RedisClientPool> {
         Ok({
-            let connections = urls.to_owned().iter().map(| url | {
-                // map each value to a client open if possible
-                // ignore invalid servers
-                Client::open(url.to_owned()).unwrap()
-                // todo: notify if invalid
-            }).collect();
+            let mut client_map: HashMap<String, Client> = HashMap::new();
+
+            for url in urls {
+                client_map.insert(url.to_owned(), Client::open(url.to_owned()).unwrap());
+            }
 
             RedisClientPool {
                 urls: urls.to_owned(),
-                clients: connections,
+                client_map: client_map.to_owned(),
+                connections: HashMap::new(),
             }
         })
+    }
+
+    /// Connects to all of the various Clients being used
+    async fn connect_all(self) -> Vec<Connection> {
+        // Cannot directly map from an iterator, this is because the impl trait in direct typing isn't enabled by default
+        let mut future_objects = Vec::new();
+
+        for client in self.client_map.values(){
+            future_objects.push(client.get_tokio_connection());
+        }
+
+        return try_join_all(future_objects).await.unwrap();
     }
 }
 
@@ -155,6 +169,8 @@ impl Storage for RedisClusterCache {
         Box::new(
             Box::pin(async move {
                 let mut c = me.sync_connect()?;
+                // this should be using cluter_pipe() https://docs.rs/redis/0.20.0/redis/cluster/struct.ClusterPipeline.html
+                // but it lacks support for pretty much every single command you use
                 let result: redis::RedisResult<HashMap<String, usize>> = cmd("CONFIG")
                     .arg("GET")
                     .arg("maxmemory")
