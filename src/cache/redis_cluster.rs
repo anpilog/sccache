@@ -15,7 +15,7 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::{cmd, InfoDict, Client, RedisResult};
+use redis::{cmd, InfoDict, Client, RedisResult, RedisError};
 use redis::cluster::{ClusterClient, ClusterConnection, cluster_pipe};
 use redis::aio::Connection;
 use std::collections::HashMap;
@@ -26,21 +26,14 @@ use std::time::{Duration, Instant};
 use crate::config::{SliceDisplay};
 use futures_03::future::{try_join_all, ok, err};
 
-/// A Redis Cluster Client Implementation
-/// Unfortunately Cluster Connection does not implement aio:ConnectionLike - only sync
-#[derive(Clone)]
-pub struct RedisClusterCache {
-    urls: Vec<String>,
-    cluster_client: ClusterClient,
-}
-
 /// An Alternative to `RedisClusterCache` that will implement Async `Redis::Client` in a thread pool
 /// Each Client is resolved and printed independently
+#[derive(Clone)]
 pub struct RedisClientPool {
     urls: Vec<String>,
     client_map: HashMap<String, Client>,
     // this isn't really necessary but for repeated transactions life would be easier
-    connections: HashMap<String, Connection>
+    // connections: HashMap<String, Connection>
 }
 
 impl RedisClientPool {
@@ -56,13 +49,13 @@ impl RedisClientPool {
             RedisClientPool {
                 urls: urls.to_owned(),
                 client_map: client_map.to_owned(),
-                connections: HashMap::new(),
+                // connections: HashMap::new(),
             }
         })
     }
 
     /// Connects to all of the various Clients being used
-    async fn connect_all(self) -> Vec<Connection> {
+    async fn connect_all(self) -> core::result::Result<Vec<Connection>, RedisError> {
         // Cannot directly map from an iterator, this is because the impl trait in direct typing isn't enabled by default
         let mut future_objects = Vec::new();
 
@@ -70,59 +63,27 @@ impl RedisClientPool {
             future_objects.push(client.get_tokio_connection());
         }
 
-        return try_join_all(future_objects).await.unwrap();
+        return try_join_all(future_objects).await;
     }
 }
 
-impl RedisClusterCache {
-    /// Create a new `RedisClusterCache`.
-    pub fn new(urls: &Vec<String>) -> Result<RedisClusterCache> {
-        // Initialize urls and cluster_client
-        Ok(RedisClusterCache {
-            urls: urls.to_owned(),
-            // does a sanity check of the nodes and passwords
-            cluster_client: ClusterClient::open(urls.to_owned())?,
-        })
-    }
+impl Storage for RedisClientPool {
+    // copied over from the basic redis implementation for testing
 
-    /*
-    async fn connect(self) -> Result<Connection> {
-        Ok(self.client.get_tokio_connection().await?)
-    }
-    */
-
-    /// Returns a connection with configured read and write timeouts.
-    /// This is a synchronous call instead of async, could however be made async if someone really wanted
-    /// With a pool of regular Redis Clients
-    ///
-    /// TODO: this should only be called once and preserved with the chek_connection function
-    pub fn sync_connect(self) -> Result<ClusterConnection> {
-        Ok(
-            // propagate the error up if this is a failure for some reason
-            self.cluster_client.get_connection()?
-        )
-    }
-}
-
-impl Storage for RedisClusterCache {
-    /// Open a connection and query for a key.
     fn get(&self, key: &str) -> SFuture<Cache> {
         let key = key.to_owned();
         let me = self.clone();
         Box::new(
             Box::pin(async move {
-                // converted to sync for a cluster connection
-                let mut c = me.sync_connect()?;
-                // ClusterConnection implements a ConnectionLike which is already used by this
-                // Oh good lord apparently it doesn't implement aio::ConnectionLike
-                let d: Vec<u8> = cmd("GET").arg(key).query(&mut c)?;
+                let mut c = me.connect_all().await?;
+                let d: Vec<u8> = cmd("GET").arg(key).query_async(&mut c[0]).await?;
                 if d.is_empty() {
                     Ok(Cache::Miss)
                 } else {
                     CacheRead::from(Cursor::new(d)).map(Cache::Hit)
                 }
             })
-            .compat(),
+                .compat(),
         )
     }
 
@@ -133,12 +94,12 @@ impl Storage for RedisClusterCache {
         let start = Instant::now();
         Box::new(
             Box::pin(async move {
-                let mut c = me.sync_connect()?;
+                let mut c = me.connect_all().await?;
                 let d = entry.finish()?;
-                cmd("SET").arg(key).arg(d).query(&mut c)?;
+                cmd("SET").arg(key).arg(d).query_async(&mut c[0]).await?;
                 Ok(start.elapsed())
             })
-            .compat(),
+                .compat(),
         )
     }
 
@@ -153,11 +114,11 @@ impl Storage for RedisClusterCache {
         let me = self.clone(); // TODO Remove clone
         Box::new(
             Box::pin(async move {
-                let mut c = me.sync_connect()?;
-                let v: InfoDict = cmd("INFO").query(&mut c)?;
+                let mut c = me.connect_all().await?;
+                let v: InfoDict = cmd("INFO").query_async(&mut c[0]).await?;
                 Ok(v.get("used_memory"))
             })
-            .compat(),
+                .compat(),
         )
     }
 
@@ -168,13 +129,12 @@ impl Storage for RedisClusterCache {
         let me = self.clone(); // TODO Remove clone
         Box::new(
             Box::pin(async move {
-                let mut c = me.sync_connect()?;
-                // this should be using cluter_pipe() https://docs.rs/redis/0.20.0/redis/cluster/struct.ClusterPipeline.html
-                // but it lacks support for pretty much every single command you use
+                let mut c = me.connect_all().await?;
                 let result: redis::RedisResult<HashMap<String, usize>> = cmd("CONFIG")
                     .arg("GET")
                     .arg("maxmemory")
-                    .query(&mut c);
+                    .query_async(&mut c[0])
+                    .await;
                 match result {
                     Ok(h) => {
                         Ok(h.get("maxmemory")
@@ -183,7 +143,7 @@ impl Storage for RedisClusterCache {
                     Err(_) => Ok(None),
                 }
             })
-            .compat(),
+                .compat(),
         )
     }
 }

@@ -21,7 +21,7 @@ use crate::cache::gcs::{self, GCSCache, GCSCredentialProvider, RWMode, ServiceAc
 use crate::cache::memcached::MemcachedCache;
 #[cfg(feature = "redis")]
 use crate::cache::redis::RedisCache;
-use crate::cache::redis_cluster::RedisClusterCache;
+use crate::cache::redis_cluster::RedisClientPool;
 #[cfg(feature = "s3")]
 use crate::cache::s3::S3Cache;
 use crate::config::{self, CacheType, Config, SliceDisplay};
@@ -388,12 +388,12 @@ pub fn storage_from_config(config: &Config, pool: &ThreadPool) -> Arc<dyn Storag
             CacheType::RedisCluster(config::RedisClusterCacheConfig { ref url }) => {
                 debug!("Trying RedisCluster({})", SliceDisplay(url));
                 #[cfg(feature = "redis")]
-                match RedisClusterCache::new(url) {
+                match RedisClientPool::new(url) {
                     Ok(s) => {
                         trace!("Using RedisCluster: {}", SliceDisplay(url));
                         return Arc::new(s);
                     }
-                    Err(e) => warn!("Failed to create RedisClusterCache: {:?}", e),
+                    Err(e) => warn!("Failed to create RedisClientPool: {:?}", e),
                 }
             }
             CacheType::S3(ref c) => {
