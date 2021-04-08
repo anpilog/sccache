@@ -40,7 +40,7 @@ impl RedisCache {
 
     /// Returns a connection with configured read and write timeouts.
     async fn connect(self) -> Result<Connection> {
-        Ok(self.client.get_tokio_connection().await?)
+        Ok(self.client.get_async_connection().await?)
     }
 }
 

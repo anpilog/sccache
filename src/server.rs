@@ -821,6 +821,7 @@ where
     fn get_info(&self) -> SFuture<ServerInfo> {
         let stats = self.stats.borrow().clone();
         let cache_location = self.storage.location();
+        debug!("Current location of redis server : {}", cache_location);
         Box::new(
             self.storage
                 .current_size()

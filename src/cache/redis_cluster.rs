@@ -15,8 +15,7 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::{cmd, InfoDict, Client, RedisResult, RedisError};
-use redis::cluster::{ClusterClient, ClusterConnection, cluster_pipe};
+use redis::{cmd, InfoDict, Client, RedisError};
 use redis::aio::Connection;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -24,7 +23,7 @@ use std::time::{Duration, Instant};
 
 // For displaying slices of String Vecs
 use crate::config::{SliceDisplay};
-use futures_03::future::{try_join_all, ok, err};
+use futures_03::future::{try_join_all};
 
 /// An Alternative to `RedisClusterCache` that will implement Async `Redis::Client` in a thread pool
 /// Each Client is resolved and printed independently
@@ -60,7 +59,7 @@ impl RedisClientPool {
         let mut future_objects = Vec::new();
 
         for client in self.client_map.values(){
-            future_objects.push(client.get_tokio_connection());
+            future_objects.push(client.get_async_connection());
         }
 
         return try_join_all(future_objects).await;

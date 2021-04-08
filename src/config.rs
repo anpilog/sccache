@@ -517,7 +517,7 @@ fn config_from_env() -> EnvConfig {
     let redis_cluster = env::var("SCCACHE_REDIS_CLUSTER")
         .ok()
         .map(|url| {
-            let new_url_obj: Vec<String> = url.split(";").map(|item| item.to_string()).collect();
+            let new_url_obj: Vec<String> = url.split(",").map(|item| item.to_string()).collect();
             // construct the cluster with the given IP addresses
             RedisClusterCacheConfig {
                 url: new_url_obj
