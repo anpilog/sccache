@@ -693,6 +693,10 @@ where
     type Error = Error;
     type Future = SFuture<Self::Response>;
 
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
+
     fn call(&mut self, req: SccacheRequest) -> Self::Future {
         trace!("handle_client");
 
@@ -735,10 +739,6 @@ where
         };
 
         Box::new(res.map(Message::WithoutBody))
-    }
-
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
     }
 }
 
