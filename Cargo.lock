@@ -2485,7 +2485,6 @@ dependencies = [
  "tokio-uds",
  "toml",
  "tower",
- "tracing",
  "untrusted",
  "url 2.2.0",
  "uuid 0.8.1",
