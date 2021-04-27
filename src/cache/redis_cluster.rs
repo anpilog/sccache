@@ -15,7 +15,7 @@
 use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use crate::errors::*;
 use futures_03::prelude::*;
-use redis::{cmd, InfoDict, Client, RedisError};
+use redis::{cmd, InfoDict, Client, RedisError, RedisResult, ConnectionLike};
 use redis::aio::Connection;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -24,7 +24,6 @@ use std::time::{Duration, Instant};
 // For displaying slices of String Vecs
 use crate::config::{SliceDisplay};
 use futures_03::future::{try_join_all};
-use tracing::{instrument};
 
 /// An Alternative to `RedisClusterCache` that will implement Async `Redis::Client` in a thread pool
 /// Each Client is resolved and printed independently
@@ -48,8 +47,7 @@ impl RedisClientPool {
 
             RedisClientPool {
                 urls: urls.to_owned(),
-                client_map: client_map.to_owned(),
-                // connections: HashMap::new(),
+                client_map: client_map.to_owned()
             }
         })
     }
@@ -59,21 +57,31 @@ impl RedisClientPool {
         // Cannot directly map from an iterator, this is because the impl trait in direct typing isn't enabled by default
         let mut future_objects = Vec::new();
 
-        for (_url, client) in self.client_map.iter(){
+        for client in self.client_map.values(){
+            //debug!("Adding {} to connection list", _url);
             future_objects.push(client.get_async_connection());
         }
 
         return try_join_all(future_objects).await;
     }
 
-    async fn connect_first(self) -> core::result::Result<Connection, Error> {
-        for (_url, client) in self.client_map.iter(){
+    async fn connect_first(self) -> core::result::Result<(Connection, String), Error> {
+        for (url, client) in self.client_map.iter(){
             match client.get_async_connection().await {
-                Ok(c) => return Ok(c),
-                Err(..) => {}
+                Ok(c) => {
+                    if client.to_owned().check_connection() {
+                        debug!("Connected successfully to : {}", url);
+                        return Ok((c, url.to_owned()));
+                    }else{
+                        error!("Connection to {} is open but cannot Ping - trying next", url);
+                    }
+                },
+                Err(e) => {
+                    debug!("Failed to connect to {} due to {:?}", url, e);
+                }
             }
         }
-        Err(Error::msg("Cannot find a valid connection in REDISCLUSTER"))
+        Err(Error::msg("Cannot find a valid connection in SCCACHE_REDIS_CLUSTER"))
     }
 }
 
@@ -86,12 +94,27 @@ impl Storage for RedisClientPool {
         Box::new(
             Box::pin(async move {
                 let mut conn = me.connect_first().await?;
-                let d: Vec<u8> = cmd("GET").arg(key).query_async(&mut conn).await?;
-                if d.is_empty() {
-                    Ok(Cache::Miss)
-                } else {
-                    CacheRead::from(Cursor::new(d)).map(Cache::Hit)
+                let d: RedisResult<Vec<u8>> = cmd("GET")
+                    .arg(key.to_owned())
+                    .query_async(&mut conn.0)
+                    .await;
+
+                match d {
+                    Ok(res) => {
+                        if res.is_empty() {
+                            debug!("Cache miss on {} for {:?}", conn.1, key);
+                            Ok(Cache::Miss)
+                        } else {
+                            CacheRead::from(Cursor::new(res)).map(Cache::Hit)
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to get {} from {} because {}", key, conn.1, e);
+                        Ok(Cache::Miss)
+                    }
                 }
+
+
             })
                 .compat(),
         )
@@ -107,7 +130,10 @@ impl Storage for RedisClientPool {
                 let connections = me.connect_all().await?;
                 let d = entry.finish()?;
 
+                debug!("Putting values into reddis clusters : {}" , key);
+
                 for mut conn in connections {
+                    // could try to get errors for this - probably not worth it
                     cmd("SET")
                         .arg(key.to_owned())
                         .arg(d.to_owned())
@@ -128,14 +154,25 @@ impl Storage for RedisClientPool {
 
     /// Returns the current cache size. This value is aquired via
     /// the Redis INFO command (used_memory).
-    #[instrument]
+    // #[instrument]
     fn current_size(&self) -> SFuture<Option<u64>> {
         let me = self.clone(); // TODO Remove clone
         Box::new(
             Box::pin(async move {
-                let mut c = me.connect_first().await?;
-                let v: InfoDict = cmd("INFO").query_async(&mut c).await?;
-                Ok(v.get("used_memory"))
+                let mut c_ = me.connect_first().await?;
+                let v : RedisResult<InfoDict> = cmd("INFO").query_async(&mut c_.0).await;
+                match v {
+                    Ok(dict_) => {
+                        let size : Option<u64> = dict_.get("used_memory");
+                        debug!("Current Size from {} : {:?}", c_.1, size);
+                        Ok(size)
+                    },
+                    Err(e) => {
+                        error!("Error while getting current_size from {} : {:?}", c_.1, e);
+                        Ok(None)
+                    }
+                }
+
             })
                 .compat(),
         )
@@ -144,27 +181,29 @@ impl Storage for RedisClientPool {
     /// Returns the maximum cache size. This value is read via
     /// the Redis CONFIG command (maxmemory). If the server has no
     /// configured limit, the result is None.
-    #[instrument]
     fn max_size(&self) -> SFuture<Option<u64>> {
         let me = self.clone(); // TODO Remove clone
         Box::new(
             Box::pin(
                 async move {
-                    let mut c = me.connect_first().await?;
+                    let mut c_ = me.connect_first().await?;
 
                     let result: redis::RedisResult<HashMap<String, usize>> = cmd("CONFIG")
                         .arg("GET")
                         .arg("maxmemory")
-                        .query_async(&mut c)
+                        .query_async(&mut c_.0)
                         .await;
-
 
                     match result {
                         Ok(h) => {
-                            Ok(h.get("maxmemory")
-                                .and_then(|&s| if s != 0 { Some(s as u64) } else { None }))
+                            let size: Option<&usize> = h.get("maxmemory");
+                            debug!("Max Size from {} : {:?}", c_.1, size);
+                            Ok(size.and_then(|&s| if s != 0 { Some(s as u64) } else { None }))
                         }
-                        Err(_) => Ok(None),
+                        Err(e) => {
+                            error!("Error occurred during max_size from {} : {:?}", c_.1, e);
+                            Ok(None)
+                        },
                     }
                 }
             )
